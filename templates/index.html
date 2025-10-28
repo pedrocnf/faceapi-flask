@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Face App — Webcam + Reconhecimento + Idade</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+  <main class="container">
+    <h1>Face App</h1>
+    <div class="sub">Detecção, landmarks, expressões, <strong>reconhecimento</strong> e <strong>idade/gênero</strong> — tudo em um único canvas.</div>
+
+    <!-- MODELOS -->
+    <section class="panel">
+      <h3>Modelos</h3>
+      <div class="controls">
+        <label>Origem:
+          <select id="modelSource">
+            <option value="cdn" selected>CDN</option>
+            <option value="local">Local (/static/models)</option>
+          </select>
+        </label>
+        <button id="btnLoadModels" class="btn">Carregar modelos</button>
+        <span id="modelStatus" class="status">Aguardando…</span>
+      </div>
+    </section>
+
+    <!-- ENROLL / RECONHECIMENTO -->
+    <section class="panel">
+      <h3>Reconhecimento — Cadastro (enroll)</h3>
+      <div class="controls">
+        <input id="personName" class="text" placeholder="Nome da pessoa (ex.: Pedro)" />
+        <input id="filesEnroll" type="file" accept="image/*" multiple />
+        <button id="btnEnrollFromFiles" class="btn">Cadastrar das imagens</button>
+        <button id="btnEnrollFromWebcam" class="btn">Cadastrar da webcam</button>
+        <button id="btnClearEnroll" class="btn danger">Limpar cadastros</button>
+      </div>
+      <div class="controls">
+        <label>Limiar de match:
+          <input id="matchThreshold" type="range" min="0.3" max="0.8" step="0.01" value="0.6"/>
+          <span id="matchVal">0.60</span>
+        </label>
+      </div>
+      <div id="enrollStatus" class="status">0 pessoa(s) cadastrada(s).</div>
+      <ul id="enrollList"></ul>
+    </section>
+
+    <!-- WEBCAM -->
+    <section class="panel">
+      <h3>Webcam</h3>
+      <div class="controls">
+        <label>Detector:
+          <select id="modelSelect">
+            <option value="tiny">Tiny (rápido)</option>
+            <option value="ssd" selected>SSD Mobilenet (preciso)</option>
+          </select>
+        </label>
+        <label id="tinyOpts" class="inline">
+          inputSize:
+          <select id="inputSize">
+            <option>160</option><option>224</option><option selected>320</option><option>384</option>
+          </select>
+          score:
+          <input id="score" type="number" min="0.1" max="0.99" step="0.05" value="0.3"/>
+        </label>
+        <label class="inline"><input id="drawLandmarks" type="checkbox" checked> Landmarks</label>
+        <label class="inline"><input id="drawExpressions" type="checkbox" checked> Expressões</label>
+        <label class="inline"><input id="enableRecognition" type="checkbox" checked> Reconhecimento</label>
+        <label class="inline"><input id="showAge" type="checkbox" checked> Idade/Gênero</label>
+      </div>
+
+      <div class="stage-wrap">
+        <!-- Canvas ÚNICO visível -->
+        <canvas id="stage"
+                width="640"
+                height="480"
+                style="width:640px;height:480px;background:#000">
+        </canvas>
+        <!-- NÃO há <video> no DOM; ele é criado em memória -->
+      </div>
+
+      <div class="controls">
+        <button id="btnStart" class="btn">Iniciar Webcam</button>
+        <button id="btnStop" class="btn secondary">Parar Webcam</button>
+      </div>
+
+      <div id="liveStatus" class="status"></div>
+    </section>
+  </main>
+
+  <script>
+    // ===== Elementos
+    const stage = document.getElementById('stage');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop  = document.getElementById('btnStop');
+    const liveStatus = document.getElementById('liveStatus');
+
+    const modelSource = document.getElementById('modelSource');
+    const btnLoadModels = document.getElementById('btnLoadModels');
+    const modelStatus = document.getElementById('modelStatus');
+
+    const modelSelect = document.getElementById('modelSelect');
+    const tinyOpts    = document.getElementById('tinyOpts');
+    const inputSizeEl = document.getElementById('inputSize');
+    const scoreEl     = document.getElementById('score');
+    const drawLandmarksEl   = document.getElementById('drawLandmarks');
+    const drawExpressionsEl = document.getElementById('drawExpressions');
+    const enableRecognitionEl = document.getElementById('enableRecognition');
+    const showAgeEl = document.getElementById('showAge');
+
+    const personName = document.getElementById('personName');
+    const filesEnroll = document.getElementById('filesEnroll');
+    const btnEnrollFromFiles = document.getElementById('btnEnrollFromFiles');
+    const btnEnrollFromWebcam = document.getElementById('btnEnrollFromWebcam');
+    const btnClearEnroll = document.getElementById('btnClearEnroll');
+    const enrollStatus = document.getElementById('enrollStatus');
+    const enrollList   = document.getElementById('enrollList');
+    const matchThreshold = document.getElementById('matchThreshold');
+    const matchVal = document.getElementById('matchVal');
+
+    // ===== Estado
+    let modelsReady = false;
+    let stream = null;
+    let rafId = null;
+    let looping = false;
+    const CSS_W = 640, CSS_H = 480;
+
+    // vídeo fora do DOM
+    let videoEl = null;
+
+    // reconhecimento
+    const ENROLL = {}; // { name: Float32Array[] }
+    let matcher = null;
+
+    // ===== Helpers UI
+    function status(el, text){ el.textContent = text; }
+    function refreshEnrollUI(){
+      enrollList.innerHTML = "";
+      Object.keys(ENROLL).forEach(name=>{
+        const li = document.createElement("li");
+        li.textContent = `${name}: ${ENROLL[name].length} amostra(s)`;
+        enrollList.appendChild(li);
+      });
+      enrollStatus.textContent = `${Object.keys(ENROLL).length} pessoa(s) cadastrada(s).`;
+    }
+    function getThreshold(){ return parseFloat(matchThreshold.value); }
+
+    // detector opts
+    function getTinyOptions(){
+      return new faceapi.TinyFaceDetectorOptions({
+        inputSize: parseInt(inputSizeEl.value,10),
+        scoreThreshold: parseFloat(scoreEl.value)
+      });
+    }
+    function getSsdOptions(){
+      return new faceapi.SsdMobilenetv1Options({
+        minConfidence: parseFloat(scoreEl.value)
+      });
+    }
+    function currentOptions(){ return modelSelect.value === 'tiny' ? getTinyOptions() : getSsdOptions(); }
+    modelSelect.addEventListener('change', ()=>{
+      tinyOpts.style.display = modelSelect.value === 'tiny' ? 'inline-flex' : 'none';
+    });
+
+    // ===== Modelos
+    const MODEL_SOURCES = {
+      cdn: "https://cdn.jsdelivr.net/gh/cgarciagl/face-api.js@0.22.2/weights",
+      local: "/static/models"
+    };
+    let MODEL_URL = MODEL_SOURCES.cdn;
+    modelSource.addEventListener('change', ()=>{
+      MODEL_URL = modelSource.value === 'local' ? MODEL_SOURCES.local : MODEL_SOURCES.cdn;
+    });
+
+    btnLoadModels.addEventListener('click', async ()=>{
+      status(modelStatus, 'Carregando modelos…');
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL)
+      ]);
+      modelsReady = true;
+      status(modelStatus, '✔️ Modelos carregados.');
+    });
+
+    // ===== Reconhecimento (FaceMatcher)
+    async function rebuildMatcher(){
+      const labeled = [];
+      for(const [name,descs] of Object.entries(ENROLL)){
+        if (descs.length) labeled.push(new faceapi.LabeledFaceDescriptors(name, descs));
+      }
+      matcher = labeled.length ? new faceapi.FaceMatcher(labeled, getThreshold()) : null;
+    }
+    matchThreshold.addEventListener("input", ()=>{
+      matchVal.textContent = getThreshold().toFixed(2);
+      if (matcher) rebuildMatcher();
+    });
+
+    btnEnrollFromFiles.addEventListener("click", async ()=>{
+      if(!modelsReady) return alert("Carregue os modelos primeiro.");
+      const name = (personName.value || "").trim();
+      if(!name) return alert("Informe um nome.");
+      const files = Array.from(filesEnroll.files || []);
+      if(!files.length) return alert("Escolha ao menos uma imagem.");
+      if(!ENROLL[name]) ENROLL[name] = [];
+
+      for(const f of files){
+        const img = await faceapi.bufferToImage(f);
+        const det = await faceapi
+          .detectSingleFace(img, currentOptions())
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+        if(det?.descriptor) ENROLL[name].push(det.descriptor);
+      }
+      refreshEnrollUI();
+      await rebuildMatcher();
+      alert(`Cadastrado: ${name}`);
+    });
+
+    btnEnrollFromWebcam.addEventListener("click", async ()=>{
+      if(!modelsReady) return alert("Carregue os modelos primeiro.");
+      const name = (personName.value || "").trim();
+      if(!name) return alert("Informe um nome.");
+      if(!videoEl || videoEl.readyState < 2) return alert("Inicie a webcam e posicione o rosto.");
+
+      // snapshot do frame atual
+      const snap = document.createElement("canvas");
+      snap.width = CSS_W; snap.height = CSS_H;
+      snap.getContext("2d").drawImage(videoEl, 0, 0, CSS_W, CSS_H);
+
+      const det = await faceapi
+        .detectSingleFace(snap, currentOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if(det?.descriptor){
+        if(!ENROLL[name]) ENROLL[name] = [];
+        ENROLL[name].push(det.descriptor);
+        refreshEnrollUI();
+        await rebuildMatcher();
+        alert(`Snapshot cadastrado para ${name}`);
+      } else {
+        alert("Nenhum rosto nítido no snapshot. Tente novamente.");
+      }
+    });
+
+    btnClearEnroll.addEventListener("click", ()=>{
+      Object.keys(ENROLL).forEach(k=>delete ENROLL[k]);
+      matcher = null;
+      refreshEnrollUI();
+    });
+
+    // ===== Webcam (vídeo fora do DOM)
+    async function createHiddenVideo(){
+      const v = document.createElement('video'); // fora do DOM
+      v.autoplay = true; v.muted = true; v.playsInline = true;
+      return v;
+    }
+    function readyStateName(v){
+      return ['HAVE_NOTHING','HAVE_METADATA','HAVE_CURRENT_DATA','HAVE_FUTURE_DATA','HAVE_ENOUGH_DATA'][v] || v;
+    }
+    async function waitForPlaying(video){
+      if (!video) return;
+      if (!video.paused && !video.ended && video.readyState >= 2) return;
+      await new Promise(res=>{
+        const onPlay = ()=>{ video.removeEventListener('playing', onPlay); res(); };
+        video.addEventListener('playing', onPlay, { once:true });
+        try { video.play().catch(()=>{}); } catch(e){}
+      });
+    }
+
+    btnStart.addEventListener('click', async ()=>{
+      try{
+        if(!modelsReady){ alert('Carregue os modelos primeiro.'); return; }
+        if(looping) return;
+
+        if (!videoEl) videoEl = await createHiddenVideo();
+
+        const constraints = {
+          video: { width:{ideal:CSS_W}, height:{ideal:CSS_H}, facingMode:'user' },
+          audio: false
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoEl.srcObject = stream;
+
+        await new Promise(res=>{
+          if (videoEl.readyState >= 1) return res();
+          videoEl.onloadedmetadata = ()=>res();
+        });
+        await videoEl.play();
+        await waitForPlaying(videoEl);
+
+        startLoop();
+      } catch(e){
+        console.error(e);
+        alert('Não foi possível acessar a webcam.');
+      }
+    });
+
+    btnStop.addEventListener('click', stopLoop);
+    function stopLoop(){
+      looping = false;
+      if(rafId) cancelAnimationFrame(rafId), rafId=null;
+      if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+      if(videoEl){ videoEl.srcObject = null; }
+      const ctx = stage.getContext('2d');
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,stage.width, stage.height);
+      status(liveStatus, "");
+    }
+
+    // ===== Loop principal
+    function startLoop(){
+      if(looping) return;
+      looping = true;
+
+      // buffer simples para suavizar idade (EMA)
+      let smoothAge = null;
+      const alpha = 0.25; // suavização (0..1)
+
+      const tick = async ()=>{
+        if(!looping) return;
+
+        // 1) DETECÇÃO
+        let results = [];
+        try{
+          results = await faceapi
+            .detectAllFaces(videoEl, currentOptions())
+            .withFaceLandmarks()
+            .withFaceExpressions()
+            .withFaceDescriptors()
+            .withAgeAndGender();
+        }catch(e){
+          console.error('Erro detecção:', e);
+        }
+
+        // 2) DESENHO
+        const ctx = stage.getContext('2d');
+        ctx.setTransform(1,0,0,1,0,0);
+        ctx.clearRect(0,0,stage.width, stage.height);
+        if (videoEl?.readyState >= 2) {
+          ctx.drawImage(videoEl, 0, 0, CSS_W, CSS_H);
+        } else {
+          ctx.fillStyle='#111'; ctx.fillRect(0,0,stage.width,stage.height);
+        }
+
+        const dims = { width: CSS_W, height: CSS_H };
+        const resized = faceapi.resizeResults(results, dims);
+
+        // 2.1) Caixas
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,255,0,0.95)';
+        resized.forEach(r=>{
+          const { x, y, width, height } = r.detection.box;
+          ctx.strokeRect(x, y, width, height);
+        });
+
+        // 2.2) Landmarks
+        if (drawLandmarksEl.checked) {
+          resized.forEach(r=>{
+            const pts = r?.landmarks?.positions || [];
+            if (!pts.length) return;
+            // mandíbula
+            ctx.save();
+            ctx.globalAlpha = 0.95;
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(0,255,0,0.95)';
+            ctx.beginPath();
+            for(let i=0;i<=16;i++){
+              const p=pts[i];
+              if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
+            }
+            ctx.stroke();
+            ctx.restore();
+            // pontos
+            ctx.save();
+            const R=4.5;
+            for(const p of pts){
+              ctx.beginPath();
+              ctx.arc(p.x,p.y,R,0,Math.PI*2);
+              ctx.fillStyle='rgba(0,255,0,1)';
+              ctx.fill();
+              ctx.lineWidth=2;
+              ctx.strokeStyle='black';
+              ctx.stroke();
+            }
+            ctx.restore();
+          });
+        }
+
+        // 2.3) Expressões + Reconhecimento + Idade/Gênero
+        ctx.font = '14px system-ui, Arial';
+        resized.forEach(r=>{
+          const { x, y } = r.detection.box;
+          let lines = [];
+
+          // reconhecimento
+          if (enableRecognitionEl.checked && matcher && r.descriptor) {
+            const best = matcher.findBestMatch(r.descriptor);
+            lines.push(`👤 ${best.label} (${best.distance.toFixed(2)})`);
+          }
+
+          // idade/gênero
+          if (showAgeEl.checked && r.age != null && r.gender) {
+            const rawAge = r.age;
+            smoothAge = (smoothAge == null) ? rawAge : (alpha*rawAge + (1-alpha)*smoothAge);
+            const ageTxt = `${Math.round(smoothAge)}y`;
+            const genTxt = r.gender === 'male' ? 'M' : 'F';
+            lines.push(`🎂 ${ageTxt} • ${genTxt}`);
+          }
+
+          // expressões (melhor)
+          if (drawExpressionsEl.checked && r.expressions) {
+            const bestE = Object.entries(r.expressions).sort((a,b)=>b[1]-a[1])[0];
+            if (bestE) lines.push(`😊 ${bestE[0]} ${(bestE[1]*100|0)}%`);
+          }
+
+          if (lines.length){
+            // bolha com fundo
+            const pad=6;
+            const text = lines.join('\n');
+            const metrics = lines.map(t => ctx.measureText(t));
+            const w = Math.max(...metrics.map(m=>m.width)) + pad*2;
+            const h = lines.length*18 + pad*2;
+
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(x, y- (h+6), w, h);
+            ctx.strokeStyle = 'rgba(0,255,0,0.9)';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(x, y- (h+6), w, h);
+
+            ctx.fillStyle = 'white';
+            lines.forEach((t,i)=> ctx.fillText(t, x+pad, y-(h+6) + pad + 14 + i*18));
+          }
+        });
+
+        status(liveStatus, `Detecções: ${resized.length}`);
+        rafId = requestAnimationFrame(tick);
+      };
+      rafId = requestAnimationFrame(tick);
+    }
+  </script>
+</body>
+</html>

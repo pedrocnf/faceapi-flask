@@ -1,0 +1,30 @@
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,Arial;background:#0b1020;color:#e9eefc}
+.container{max-width:980px;margin:24px auto;padding:0 16px}
+h1{font-size:1.25rem;margin:0 0 12px}
+.sub{opacity:.8;margin-top:-6px;margin-bottom:16px;font-size:.95rem}
+
+.panel{margin:14px 0;padding:14px;background:#0f1633;border:1px solid #243060;border-radius:12px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0}
+.inline{display:inline-flex;gap:8px;align-items:center}
+.text{padding:8px 10px;border-radius:10px;border:1px solid #243060;background:#0f1633;color:#e9eefc;min-width:180px}
+.btn{padding:8px 12px;border:none;border-radius:10px;background:#1b5cff;color:#fff;cursor:pointer}
+.btn.secondary{background:#2a355f}
+.btn.danger{background:#b82d33}
+.status{margin-top:8px;opacity:.9}
+
+.stage-wrap{
+  position:relative;
+  width:max-content;
+  border-radius:12px;
+  overflow:hidden;
+  box-shadow:0 10px 30px rgba(0,0,0,.45);
+  background:#000;
+}
+
+/* Somente canvas é exibido */
+#stage{ display:block; }
+
+/* lista de cadastros */
+#enrollList{list-style:none;margin:6px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:4px}
+#enrollList li{background:#0b1433;border:1px solid #1f2a55;border-radius:10px;padding:6px 10px;font-size:.9rem}
