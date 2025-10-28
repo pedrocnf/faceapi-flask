@@ -58,7 +58,8 @@ Iniciar Webcam.
 Ative/desative Landmarks, Expressões, Reconhecimento, Idade/Gênero.
 
 📁 Estrutura do Projeto
-.
+
+
 ├── app.py
 
 ├── requirements.txt
@@ -77,21 +78,37 @@ Ative/desative Landmarks, Expressões, Reconhecimento, Idade/Gênero.
 Se quiser usar modelos locais, crie também:
 
 static/
+
 └── models/
+
     ├── tiny_face_detector_model-weights_manifest.json
+    
     ├── tiny_face_detector_model-shard1.bin
+    
     ├── ssd_mobilenetv1_model-weights_manifest.json
+    
     ├── ssd_mobilenetv1_model-shard1.bin
+    
     ├── ssd_mobilenetv1_model-shard2.bin
+    
     ├── face_landmark_68_model-weights_manifest.json
+    
     ├── face_landmark_68_model-shard1.bin
+    
     ├── face_expression_model-weights_manifest.json
+    
     ├── face_expression_model-shard1.bin
+    
     ├── face_recognition_model-weights_manifest.json
+    
     ├── face_recognition_model-shard1.bin
+    
     ├── face_recognition_model-shard2.bin
+    
     ├── age_gender_model-weights_manifest.json
+    
     └── age_gender_model-shard1.bin
+    
 
 
 No app, selecione “Local (/static/models)” antes de carregar os modelos.
