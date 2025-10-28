@@ -14,3 +14,27 @@ Aplicação web simples que usa face-api.js (TensorFlow.js) no frontend e Flask 
  - Estimar idade e gênero
 
 Tudo é desenhado em um único <canvas>, evitando problemas de overlay/z-index. O <video> fica fora do DOM e serve apenas como fonte dos frames.
+
+🧱 Arquitetura
+
+Frontend
+
+face-api.js (via CDN) para detecção/landmarks/expressões/reconhecimento/idade-gênero
+
+Canvas único para renderizar frame da webcam + overlays
+
+Enroll de pessoas com LabeledFaceDescriptors + FaceMatcher
+
+Backend
+
+Flask serve os arquivos estáticos e o HTML
+
+Não há processamento de imagem no servidor
+
+📦 Requisitos
+
+Python 3.9+
+
+Node não é necessário (usamos face-api via CDN)
+
+Navegador com suporte a getUserMedia (Chrome, Edge, etc.)
