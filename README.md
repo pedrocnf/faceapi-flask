@@ -60,11 +60,17 @@ Ative/desative Landmarks, Expressões, Reconhecimento, Idade/Gênero.
 📁 Estrutura do Projeto
 .
 ├── app.py
+
 ├── requirements.txt
+
 ├── static
+
 │   └── css
+
 │       └── styles.css
+
 └── templates
+
     └── index.html
 
 
