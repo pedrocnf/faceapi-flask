@@ -152,3 +152,11 @@ Todo o processamento de vídeo/rosto acontece no navegador.
 O servidor Flask só entrega arquivos estáticos/HTML.
 
 Não há armazenamento de imagens no backend. (Os descritores de “enroll” vivem na memória do navegador enquanto a página está aberta.)
+
+🙏 Créditos
+
+face-api.js (por @justadudewhohacks e colaboradores)
+
+TensorFlow.js
+
+Flask
